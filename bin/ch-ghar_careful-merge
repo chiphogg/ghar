@@ -1,0 +1,64 @@
+#!/bin/bash
+
+# Grab local copies (if any) of every file which exists in the master branch
+
+# Helpful variables
+ERR_BAD_ARG_CNT=1
+TMP_FILE="/tmp/ghar_listy"
+
+# Helper function to check if git directory is clean, from:
+# http://stackoverflow.com/a/2658301/1523582
+# Returns "*" if the current git branch is dirty.
+function evil_git_dirty {
+  [[ $(git diff --shortstat 2> /dev/null | tail -n1) != "" ]] && echo "*"
+}
+
+# Make sure we called it the right way
+Usage() { echo "Usage: ${0##*/} <computer_name>"; exit "$1"; }
+[ $# -eq 1 ] || Usage "$ERR_BAD_ARG_CNT"
+
+# List all the files in a respository... except for .git/
+for I in `find . -iname \* | grep -Pv '^\.($|\/\.git($|\/))'`
+do
+  echo "$I" >> "$TMP_FILE"
+done
+
+# Make a new branch (named after THIS computer)
+# Note that it should be an ORPHAN branch.
+# And we don't want to rely on git >1.7.2 being present.
+# Based on:
+#   http://docwhat.org/2010/12/git-tip-empty-branch/
+git symbolic-ref HEAD "refs/heads/$1"
+rm .git/index
+git clean -xfd
+
+# The new branch should contain only *local* copies of files *which are
+# versioned in master*.
+cat "$TMP_FILE" | while read FNAME
+do
+  HOME_FNAME="$HOME/$FNAME"
+  if [ -s "$HOME_FNAME" ]
+  then
+    cp "$HOME_FNAME" .
+    git add "$FNAME"
+  fi
+done
+
+# Save this branch for posterity
+git commit -m "Save old config for $1"
+# If it worked, we can remove the local versions
+GIT_STATUS=$( git status --porcelain 2> /dev/null )
+if [ "$GIT_STATUS" = '' ] 
+then
+  cat "$TMP_FILE" | while read FNAME
+  do
+    HOME_FNAME="$HOME/$FNAME"
+    rm -f "$HOME_FNAME"
+  done
+fi
+
+# NOW it's ok to merge into master
+git checkout master
+git merge "$1"
+
+
